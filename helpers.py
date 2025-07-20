@@ -302,6 +302,39 @@ def create_config(output_dir):
 
     return config
 
+def create_manifest_config(output_dir, manifest_path=None):  # Add manifest_path parameter
+    DOMAIN_TYPE = "telephonic"
+    CONFIG_LOCAL_DIRECTORY = "nemo_msdd_configs"
+    CONFIG_FILE_NAME = f"diar_infer_{DOMAIN_TYPE}.yaml"
+    MODEL_CONFIG_PATH = os.path.join(CONFIG_LOCAL_DIRECTORY, CONFIG_FILE_NAME)
+    if not os.path.exists(MODEL_CONFIG_PATH):
+        os.makedirs(CONFIG_LOCAL_DIRECTORY, exist_ok=True)
+        CONFIG_URL = f"https://raw.githubusercontent.com/NVIDIA/NeMo/main/examples/speaker_tasks/diarization/conf/inference/{CONFIG_FILE_NAME}"
+        MODEL_CONFIG_PATH = wget.download(CONFIG_URL, MODEL_CONFIG_PATH)
+
+    config = OmegaConf.load(MODEL_CONFIG_PATH)
+
+    # If a manifest path is provided, use it. Otherwise, this will be set later.
+    if manifest_path:
+        config.diarizer.manifest_filepath = manifest_path
+
+    pretrained_vad = "vad_multilingual_marblenet"
+    pretrained_speaker_model = "titanet_large"
+    config.num_workers = 0  # Set to 0 for server to avoid multiprocessing issues
+    config.diarizer.out_dir = output_dir
+
+    config.diarizer.speaker_embeddings.model_path = pretrained_speaker_model
+    config.diarizer.oracle_vad = False
+    config.diarizer.clustering.parameters.oracle_num_speakers = False
+
+    config.diarizer.vad.model_path = pretrained_vad
+    config.diarizer.vad.parameters.onset = 0.8
+    config.diarizer.vad.parameters.offset = 0.6
+    config.diarizer.vad.parameters.pad_offset = -0.05
+    config.diarizer.msdd_model.model_path = "diar_msdd_telephonic"
+
+    return config
+
 
 def get_word_ts_anchor(s, e, option="start"):
     if option == "end":
@@ -329,7 +362,7 @@ def get_words_speaker_mapping(wrd_ts, spk_ts, word_anchor_option="start"):
             if turn_idx == len(spk_ts) - 1:
                 e = get_word_ts_anchor(ws, we, option="end")
         wrd_spk_mapping.append(
-            {"word": wrd, "start_time": ws, "end_time": we, "speaker": sp}
+            {"word": wrd, "start_time": ws, "end_time": we, "speaker": f"Speaker {sp}"}
         )
     return wrd_spk_mapping
 
@@ -434,11 +467,16 @@ def get_realigned_ws_mapping_with_punctuation(
 
 def get_sentences_speaker_mapping(word_speaker_mapping, spk_ts):
     sentence_checker = nltk.tokenize.PunktSentenceTokenizer().text_contains_sentbreak
-    s, e, spk = spk_ts[0]
-    prev_spk = spk
-
+    
+    if not word_speaker_mapping:
+        return []
+    
+    # Get initial speaker from first word
+    first_word = word_speaker_mapping[0]
+    prev_spk = first_word["speaker"]
+    
     snts = []
-    snt = {"speaker": f"Speaker {spk}", "start_time": s, "end_time": e, "text": ""}
+    snt = {"speaker": prev_spk, "start_time": first_word["start_time"], "end_time": first_word["end_time"], "text": ""}
 
     for wrd_dict in word_speaker_mapping:
         wrd, spk = wrd_dict["word"], wrd_dict["speaker"]
@@ -446,7 +484,7 @@ def get_sentences_speaker_mapping(word_speaker_mapping, spk_ts):
         if spk != prev_spk or sentence_checker(snt["text"] + " " + wrd):
             snts.append(snt)
             snt = {
-                "speaker": f"Speaker {spk}",
+                "speaker": spk,
                 "start_time": s,
                 "end_time": e,
                 "text": "",
