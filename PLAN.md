@@ -3,16 +3,18 @@
 ## ✅ **COMPLETED**: OpenAI-Compatible Whisper Diarization Server
 
 ### 🎯 **Overview**
-Successfully implemented a FastAPI server that provides OpenAI-compatible `/v1/audio/transcriptions` endpoint using the existing whisper-diarization pipeline with chunking support for long audio files.
+Successfully implemented a FastAPI server that provides OpenAI-compatible `/v1/audio/transcriptions` endpoint using the whisper-diarization pipeline with chunking support for long audio files and advanced speaker diarization.
 
-### 🚀 **Major Improvements & Bug Fixes**
-- **✅ FIXED**: Critical memory leaks and resource management issues
-- **✅ IMPLEMENTED**: Singleton model management via ModelManager for optimal performance
-- **✅ RESOLVED**: NeMo models loading from scratch on each request (major performance fix)
+### 🚀 **Recent Major Updates & Improvements**
+- **✅ MIGRATED**: Replaced NeMo diarization with Pyannote for better performance and stability
+- **✅ ENHANCED**: Fixed verbose JSON format to match OpenAI API specification
+- **✅ IMPLEMENTED**: Speaker-aware text formatting with "Speaker 0:", "Speaker 1:" labels
+- **✅ CLEANED**: Removed legacy `use_shared_models` flags and simplified architecture
+- **✅ OPTIMIZED**: Singleton model management via ModelManager for optimal performance
+- **✅ RESOLVED**: Memory leaks and resource management issues
 - **✅ ADDED**: Configurable workflow components (vocal separation, diarization, punctuation)
-- **✅ OPTIMIZED**: 70-80% reduction in GPU memory usage
+- **✅ FIXED**: 70-80% reduction in GPU memory usage
 - **✅ ENHANCED**: 95% faster response times after startup
-- **✅ FIXED**: Temp directory configuration issue (NeMo now respects TEMP_DIR setting)
 
 ### 🔧 **Technical Implementation Status**
 
@@ -21,11 +23,26 @@ Successfully implemented a FastAPI server that provides OpenAI-compatible `/v1/a
 - **Modular Design**: ✅ Services properly separated and orchestrated
 - **Model Management**: ✅ Singleton pattern via `utils/model_manager.py`
 - **Configuration**: ✅ Environment-based workflow toggles
+- **Clean Architecture**: ✅ Removed legacy code paths and simplified service instantiation
+
+#### Diarization System - ✅ MIGRATED TO PYANNOTE
+- **Speaker Diarization**: ✅ Using `pyannote/speaker-diarization-3.1` model
+- **Thread Safety**: ✅ Pyannote pipeline is stateless and reusable across requests
+- **HuggingFace Integration**: ✅ Proper authentication token handling
+- **Performance**: ✅ No more singleton state management issues from NeMo
+- **Reliability**: ✅ More robust speaker detection and boundary handling
+
+#### Response Formatting - ✅ ENHANCED
+- **Verbose JSON**: ✅ Proper OpenAI API-compatible structure with whisper segments
+- **Speaker-Aware Text**: ✅ Format: "Speaker 0: Hello Speaker 1: Hi back"
+- **SRT/VTT**: ✅ Include speaker labels in subtitle formats
+- **Data Flow**: ✅ Separates whisper segments from sentence speaker mapping
+- **Backward Compatibility**: ✅ Maintains existing API behavior
 
 #### Performance Optimizations - ✅ COMPLETED
-- **Memory Leaks**: ✅ Fixed duplicate model instances in ChunkProcessor
-- **Resource Management**: ✅ Implemented proper cleanup and shared models
-- **NeMo Loading**: ✅ Fixed per-request model loading (lines 177-196 in diarization_service.py)
+- **Memory Management**: ✅ Fixed resource leaks and proper cleanup
+- **Model Loading**: ✅ All models loaded once at startup via ModelManager
+- **Service Architecture**: ✅ Simplified to always use shared models
 - **Conditional Loading**: ✅ Models only loaded when workflow features enabled
 
 #### API Endpoints - ✅ COMPLETED
@@ -33,12 +50,40 @@ Successfully implemented a FastAPI server that provides OpenAI-compatible `/v1/a
 - **GET /health**: ✅ Health check endpoint
 - **GET /v1/models**: ✅ Model listing endpoint
 - **Response Formats**: ✅ JSON, text, SRT, VTT, verbose JSON support
+- **Speaker Labels**: ✅ All formats include speaker information when available
 
 #### Long Audio Processing - ✅ COMPLETED
 - **Chunking System**: ✅ Handles 24+ hour audio files
 - **Overlap Handling**: ✅ Prevents word cutting at boundaries
 - **Speaker Continuity**: ✅ Maintains speaker identity across chunks
-- **Memory Management**: ✅ Sequential chunk processing
+- **Memory Management**: ✅ Sequential chunk processing with proper cleanup
+- **Timestamp Alignment**: ✅ Proper alignment across merged chunks
+
+### 🔧 **Current Architecture Components**
+
+#### Core Services
+- **TranscriptionService**: Main orchestrator for end-to-end processing
+- **WhisperService**: Faster-Whisper ASR processing with shared models
+- **DiarizationService**: Pyannote-based speaker diarization with alignment
+- **AudioService**: Audio preprocessing, format handling, and chunking
+- **ChunkProcessor**: Parallel processing of long audio segments
+
+#### Model Management
+- **ModelManager**: Singleton pattern managing all ML models
+  - Whisper models (faster-whisper)
+  - Pyannote speaker diarization pipeline
+  - Alignment models (wav2vec2-based)
+  - Punctuation restoration models
+
+#### Data Flow
+1. **Audio Input**: Upload and validation
+2. **Preprocessing**: Format conversion, vocal separation (optional)
+3. **Chunking**: Split long audio with overlaps
+4. **ASR**: Whisper transcription per chunk
+5. **Diarization**: Pyannote speaker identification and alignment
+6. **Post-processing**: Punctuation restoration, timestamp alignment
+7. **Output**: Formatted response (JSON, verbose JSON, text, SRT, VTT)
+
 ## 📋 **REMAINING TASKS**: Future Enhancements
 
 ### 🔮 **Potential Optimizations**
@@ -62,55 +107,64 @@ Successfully implemented a FastAPI server that provides OpenAI-compatible `/v1/a
 
 ---
 
-## 📚 **ORIGINAL IMPLEMENTATION PLAN** (For Reference)
+## 📚 **IMPLEMENTATION HISTORY** (For Reference)
 
-The following sections document the original implementation plan that has now been **✅ COMPLETED**:
+### Phase 1: Initial Server Implementation ✅
+- FastAPI server with OpenAI-compatible endpoints
+- Basic transcription and diarization services
+- Long audio chunking support
+- Memory optimization with ModelManager
 
-### Components Implemented:
+### Phase 2: NeMo to Pyannote Migration ✅
+- **Problem**: NeMo's NeuralDiarizer had state management issues unsuitable for server usage
+- **Solution**: Migrated to Pyannote's stateless pipeline architecture
+- **Result**: More reliable, thread-safe speaker diarization
+
+### Phase 3: Response Format Enhancement ✅
+- **Problem**: Verbose JSON didn't match OpenAI API spec, missing speaker labels in text
+- **Solution**: Fixed data flow between whisper segments and sentence mappings
+- **Result**: Proper verbose JSON structure and speaker-aware text formatting
+
+### Phase 4: Code Cleanup ✅
+- **Problem**: Dual code paths with `use_shared_models` flags made codebase unwieldy
+- **Solution**: Removed legacy flags, simplified all services to use ModelManager
+- **Result**: Cleaner, more maintainable architecture
+
+### Current Components:
 
 1. **FastAPI Server Structure** - ✅ COMPLETED
    - server.py - Main FastAPI application with OpenAI-compatible endpoints
    - models.py - Pydantic models for request/response validation  
    - config.py - Configuration management with environment variables
-   - exceptions.py - Custom exception handling
 
 2. **Core Service Modules** - ✅ COMPLETED
-   - services/transcription.py - Main transcription service orchestrator with chunking
-   - services/whisper_service.py - Whisper ASR processing (extracted from diarize.py)
-   - services/diarization_service.py - Speaker diarization using NeMo (extracted from diarize.py)
+   - services/transcription.py - Main orchestrator with chunking support
+   - services/whisper_service.py - Whisper ASR processing with ModelManager
+   - services/diarization_service.py - **Pyannote-based** speaker diarization with alignment
    - services/audio_service.py - Audio preprocessing, format handling, and chunking
-   - services/chunk_processor.py - Handle long audio chunking and segment reassembly
+   - services/chunk_processor.py - Parallel long audio processing
 
 3. **Performance & Memory Management** - ✅ COMPLETED  
-   - utils/model_manager.py - **NEW** Singleton model management for optimal performance
-   - Fixed memory leaks in ChunkProcessor and duplicate model loading
-   - Implemented shared model instances across all requests
+   - utils/model_manager.py - Singleton model management for all ML models
+   - Fixed memory leaks and resource management issues
+   - Simplified architecture with consistent ModelManager usage
    - Conditional model loading based on workflow configuration
 
-4. **Long Audio Processing** - ✅ COMPLETED
-   - Audio Chunking: Split 1hr+ audio into manageable chunks (10-15 minutes)
-   - Overlap Handling: Use overlapping chunks to prevent word cutting
-   - Speaker Continuity: Maintain speaker identity across chunks
-   - Timestamp Alignment: Properly align timestamps across merged chunks
-   - Memory Management: Process chunks sequentially to avoid memory issues
+4. **Response Formatting** - ✅ ENHANCED
+   - utils/response_formatter.py - OpenAI-compatible response formatting
+   - Verbose JSON with proper whisper segment structure
+   - Speaker-aware text with "Speaker X:" labels
+   - SRT/VTT formats with speaker information
 
-5. **Utilities** - ✅ COMPLETED
-   - utils/audio_utils.py - Audio processing utilities with chunking support
-   - utils/response_formatter.py - Format responses according to OpenAI spec
-   - utils/temp_manager.py - Temporary file management
-   - utils/chunk_merger.py - Merge processed chunks back together
-
-6. **Configuration Features** - ✅ COMPLETED
-   - Environment-based workflow toggles (ENABLE_VOCAL_SEPARATION, ENABLE_SPEAKER_DIARIZATION, ENABLE_PUNCTUATION_RESTORATION)
+5. **Configuration Features** - ✅ COMPLETED
+   - Environment-based workflow toggles (vocal separation, diarization, punctuation)
+   - HuggingFace token configuration for Pyannote models
    - Configurable model paths, devices, and processing parameters
-   - Temp directory configuration (fixed NeMo temp directory issue)
 
-7. **API Endpoints** - ✅ COMPLETED
-   - POST /v1/audio/transcriptions - Main transcription endpoint with chunking
-   - GET /health - Health check endpoint  
-   - GET /v1/models - List available models
-
-8. **Dependencies & Integration** - ✅ COMPLETED
-   - Added FastAPI, uvicorn, python-multipart to requirements
-   - Maintained existing ML dependencies (faster-whisper, nemo-toolkit, etc.)
-   - Used existing helper functions and configuration patterns  
+### Technology Stack:
+- **ASR**: faster-whisper for speech-to-text
+- **Diarization**: pyannote.audio for speaker identification
+- **Alignment**: wav2vec2-based models for word-level timestamps
+- **Punctuation**: deepmultilingualpunctuation for text restoration
+- **Server**: FastAPI with OpenAI-compatible endpoints
+- **Processing**: Asynchronous chunking for long audio files
