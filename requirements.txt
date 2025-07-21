@@ -17,3 +17,4 @@ pydub>=0.25.0
 pydantic-settings>=2.0.0
 
 whisperx
+pyannote.audio>=3.1.0

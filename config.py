@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     max_audio_duration_hours: int = 24
     max_concurrent_chunks: int = 4
     
-    # HuggingFace configuration
+    # HuggingFace configuration for Pyannote diarization pipeline
     huggingface_token: Optional[str] = None
     hf_token: Optional[str] = None
     
@@ -61,9 +61,11 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
     
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
 
 
 settings = Settings()

@@ -23,13 +23,13 @@ class TranscriptionService:
     
     def __enter__(self):
         # Initialize services that use shared models from ModelManager
-        self.whisper_service = WhisperService(use_shared_models=True).__enter__()
+        self.whisper_service = WhisperService().__enter__()
 
         # Only initialize diarization service if enabled
         if settings.enable_speaker_diarization:
-            self.diarization_service = DiarizationService(use_shared_models=True)
+            self.diarization_service = DiarizationService()
 
-        self.chunk_processor = ChunkProcessor(use_shared_models=True).__enter__()
+        self.chunk_processor = ChunkProcessor().__enter__()
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -81,10 +81,12 @@ class TranscriptionService:
                 text=result["text"],
                 language=result.get("language"),
                 duration=result.get("duration"),
-                segments=result.get("sentences", []),
+                segments=result.get("sentences", []),  # Keep for backward compatibility
                 words=result.get("words", []),
                 response_format=response_format,
-                timestamp_granularities=timestamp_granularities
+                timestamp_granularities=timestamp_granularities,
+                whisper_segments=result.get("segments", []),  # Raw whisper segments for verbose JSON
+                sentences=result.get("sentences", [])  # Sentence speaker mapping for text formatting
             )
             
             logger.info(f"Transcription completed successfully")
@@ -126,15 +128,18 @@ class TranscriptionService:
             if settings.enable_speaker_diarization:
                 logger.info("Performing speaker diarization")
                 if self.diarization_service is None:
-                    self.diarization_service = DiarizationService(use_shared_models=True)
+                    self.diarization_service = DiarizationService()
                 
                 diarization_result = self.diarization_service.perform_diarization(
-                    temp_dir,
-                    full_transcript,
-                    info.get("language", "en"),
-                    settings.batch_size,
-                    enable_punctuation
+                    audio_file_path=audio_info["audio_file_path"],
+                    full_transcript=full_transcript,
+                    language=info.get("language", "en"),
+                    batch_size=settings.batch_size,
+                    enable_punctuation=enable_punctuation
                 )
+                # print('=' * 50)
+                # print(diarization_result)
+                # print('=' * 50)
 
                 return {
                     "text": full_transcript,
@@ -188,4 +193,3 @@ class TranscriptionService:
         except Exception as e:
             logger.error(f"Failed to process chunked audio: {e}")
             raise
-    

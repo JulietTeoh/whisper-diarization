@@ -18,38 +18,65 @@ class ResponseFormatter:
         segments: Optional[List[Dict[str, Any]]] = None,
         words: Optional[List[Dict[str, Any]]] = None,
         response_format: str = "json",
-        timestamp_granularities: Optional[List[str]] = None
+        timestamp_granularities: Optional[List[str]] = None,
+        whisper_segments: Optional[List[Dict[str, Any]]] = None,
+        sentences: Optional[List[Dict[str, Any]]] = None
     ) -> Any:
         if timestamp_granularities is None:
             timestamp_granularities = []
+
+        if sentences:
+            # Check if we have sentence speaker mapping for speaker-aware text
+            text = ResponseFormatter._format_speaker_aware_text(sentences)
 
         if response_format == "text":
             return text
         
         if response_format == "srt":
-            return ResponseFormatter._format_srt(segments or [])
+            return ResponseFormatter._format_srt(sentences or segments or [])
         
         if response_format == "vtt":
-            return ResponseFormatter._format_vtt(segments or [])
+            return ResponseFormatter._format_vtt(sentences or segments or [])
         
         formatted_segments = []
         formatted_words = []
         
-        if segments:
-            for i, segment in enumerate(segments):
-                formatted_segments.append(TranscriptionSegment(
-                    id=i,
-                    seek=segment.get("seek", 0),
-                    start=segment.get("start_time", 0) / 1000.0,
-                    end=segment.get("end_time", 0) / 1000.0,
-                    text=segment.get("text", ""),
-                    tokens=segment.get("tokens", []),
-                    temperature=segment.get("temperature", 0.0),
-                    avg_logprob=segment.get("avg_logprob", 0.0),
-                    compression_ratio=segment.get("compression_ratio", 1.0),
-                    no_speech_prob=segment.get("no_speech_prob", 0.0),
-                    speaker=segment.get("speaker", "Speaker 0")
-                ))
+        # For verbose JSON, use whisper_segments (which have proper structure)
+        # For regular processing, use segments (sentence speaker mapping)
+        segments_to_use = whisper_segments if response_format == "verbose_json" else (sentences or segments)
+        
+        if segments_to_use:
+            for i, segment in enumerate(segments_to_use):
+                if response_format == "verbose_json":
+                    # Whisper segments already have start/end in seconds, proper structure
+                    formatted_segments.append(TranscriptionSegment(
+                        id=i,
+                        seek=segment.get("seek", 0),
+                        start=segment.get("start", 0.0),
+                        end=segment.get("end", 0.0),
+                        text=segment.get("text", ""),
+                        tokens=segment.get("tokens", []),
+                        temperature=segment.get("temperature", 0.0),
+                        avg_logprob=segment.get("avg_logprob", 0.0),
+                        compression_ratio=segment.get("compression_ratio", 1.0),
+                        no_speech_prob=segment.get("no_speech_prob", 0.0),
+                        speaker=None  # Whisper segments don't have speaker info
+                    ))
+                else:
+                    # Sentence speaker mapping has start_time/end_time in milliseconds
+                    formatted_segments.append(TranscriptionSegment(
+                        id=i,
+                        seek=segment.get("seek", 0),
+                        start=segment.get("start_time", 0) / 1000.0,
+                        end=segment.get("end_time", 0) / 1000.0,
+                        text=segment.get("text", ""),
+                        tokens=segment.get("tokens", []),
+                        temperature=segment.get("temperature", 0.0),
+                        avg_logprob=segment.get("avg_logprob", 0.0),
+                        compression_ratio=segment.get("compression_ratio", 1.0),
+                        no_speech_prob=segment.get("no_speech_prob", 0.0),
+                        speaker=segment.get("speaker", "Speaker 0")
+                    ))
         
         if words:
             for word in words:
@@ -70,7 +97,7 @@ class ResponseFormatter:
             task="transcribe",
             language=language,
             duration=duration,
-            segments=formatted_segments if "segment" in timestamp_granularities else None,
+            segments=formatted_segments if "segment" in timestamp_granularities or response_format == "verbose_json" else None,
             words=formatted_words if "word" in timestamp_granularities else None,
             usage=usage
         )
@@ -78,10 +105,41 @@ class ResponseFormatter:
         if response_format == "json":
             return {
                 "text": response.text,
-                "usage": response.usage.dict() if response.usage else None
+                "usage": response.usage.model_dump() if response.usage else None
             }
+        elif response_format == "verbose_json":
+            # Return full response model for verbose JSON
+            return response
         
         return response
+    
+    @staticmethod
+    def _format_speaker_aware_text(sentences: List[Dict[str, Any]]) -> str:
+        """Format text with speaker labels using sentence speaker mapping."""
+        if not sentences:
+            return ""
+        
+        result_parts = []
+        previous_speaker = None
+        
+        for sentence_dict in sentences:
+            speaker = sentence_dict.get("speaker", "Speaker 0")
+            sentence_text = sentence_dict.get("text", "").strip()
+            
+            if not sentence_text:
+                continue
+                
+            # If this speaker doesn't match the previous one, start a new speaker section
+            if speaker != previous_speaker:
+                if previous_speaker is not None:
+                    result_parts.append("\n\n")
+                result_parts.append(f"{speaker}: ")
+                previous_speaker = speaker
+            
+            # Add the current sentence
+            result_parts.append(sentence_text + " ")
+        
+        return "".join(result_parts).strip()
     
     @staticmethod
     def _format_srt(segments: List[Dict[str, Any]]) -> str:

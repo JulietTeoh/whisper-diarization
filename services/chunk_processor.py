@@ -29,34 +29,22 @@ class ChunkResult:
 
 
 class ChunkProcessor:
-    def __init__(self, use_shared_models: bool = True):
-        self.use_shared_models = use_shared_models
+    def __init__(self):
         self.whisper_service = None
         self.diarization_service = None
     
     def __enter__(self):
-        # Use shared models from ModelManager instead of creating new instances
-        if self.use_shared_models:
-            self.whisper_service = WhisperService(use_shared_models=True)
-            
-            # Only initialize diarization service if enabled
-            if settings.enable_speaker_diarization:
-                self.diarization_service = DiarizationService(use_shared_models=True)
-        else:
-            # Legacy mode: create own instances
-            self.whisper_service = WhisperService(use_shared_models=False)
-            
-            # Only initialize diarization service if enabled
-            if settings.enable_speaker_diarization:
-                self.diarization_service = DiarizationService(use_shared_models=False)
+        self.whisper_service = WhisperService().__enter__()
+        # Only initialize diarization service if enabled
+        if settings.enable_speaker_diarization:
+            self.diarization_service = DiarizationService()
         
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.whisper_service:
-            self.whisper_service.cleanup()
-        if self.diarization_service and not self.use_shared_models:
-            # Only cleanup diarization service if not using shared models
+            self.whisper_service.__exit__(exc_type, exc_val, exc_tb)
+        if self.diarization_service:
             self.diarization_service.cleanup()
         return False
     
@@ -129,17 +117,17 @@ class ChunkProcessor:
         try:
             chunk_temp_dir = os.path.join(temp_dir, f"chunk_{chunk.chunk_id}")
             os.makedirs(chunk_temp_dir, exist_ok=True)
-            
             chunk_file_path = os.path.join(chunk_temp_dir, f"chunk_{chunk.chunk_id}.wav")
             
             import soundfile as sf
             sf.write(chunk_file_path, chunk.audio_data, chunk.sample_rate)
             
             full_transcript, whisper_segments, info = self.whisper_service.transcribe_audio_data(
-                chunk.audio_data,
+                chunk_file_path,
                 language=language,
                 temperature=temperature,
-                batch_size=batch_size
+                batch_size=batch_size,
+                suppress_numerals = settings.suppress_numerals
             )
             
             if not full_transcript.strip():
@@ -159,11 +147,11 @@ class ChunkProcessor:
             # Perform speaker diarization if enabled
             if settings.enable_speaker_diarization:
                 diarization_result = self.diarization_service.perform_diarization(
-                    chunk_temp_dir,
-                    full_transcript,
-                    info.get("language", "en"),
-                    batch_size,
-                    enable_punctuation
+                    audio_file_path=chunk_file_path,
+                    full_transcript=full_transcript,
+                    language=info.get("language", "en"),
+                    batch_size=batch_size,
+                    enable_punctuation=enable_punctuation
                 )
                 
                 adjusted_word_mapping = self._adjust_word_timestamps(
@@ -196,6 +184,19 @@ class ChunkProcessor:
         except Exception as e:
             logger.error(f"Failed to process chunk {chunk.chunk_id}: {e}")
             raise
+
+        finally:
+            if chunk_file_path and os.path.exists(chunk_file_path):
+                try:
+                    os.remove(chunk_file_path)
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup chunk file {chunk_file_path}: {e}")
+
+            if chunk_temp_dir and os.path.exists(chunk_temp_dir):
+                try:
+                    os.rmdir(chunk_temp_dir)
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup chunk directory {chunk_temp_dir}: {e}")
     
     def _adjust_timestamps(self, segments: List[Dict[str, Any]], offset: float) -> List[Dict[str, Any]]:
         adjusted_segments = []

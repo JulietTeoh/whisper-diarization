@@ -6,11 +6,10 @@ import torch
 import faster_whisper
 from ctc_forced_aligner import load_alignment_model
 from deepmultilingualpunctuation import PunctuationModel
-from nemo.collections.asr.models.msdd_models import NeuralDiarizer
+from pyannote.audio import Pipeline
 
 from config import settings
 from exceptions import ModelInitializationError
-from helpers import create_config
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +48,7 @@ class ModelManager:
         self.alignment_model = None
         self.alignment_tokenizer = None
         self.punctuation_model = None
-        self.nemo_diarizer = None
-        self.nemo_base_temp_dir = None
+        self.pyannote_pipeline = None
 
         # Device configuration
         self.device = settings.device
@@ -62,7 +60,7 @@ class ModelManager:
 
         if settings.enable_speaker_diarization:
             self._initialize_alignment_model()
-            self._initialize_nemo_diarizer()
+            self._initialize_pyannote_pipeline()
 
         if settings.enable_punctuation_restoration:
             self._initialize_punctuation_model()
@@ -107,17 +105,31 @@ class ModelManager:
             logger.error(f"Failed to initialize punctuation model: {e}")
             raise ModelInitializationError(f"Punctuation model initialization failed: {e}")
 
-    def _initialize_nemo_diarizer(self):
-        """Initializes the NeMo diarization model."""
+    def _initialize_pyannote_pipeline(self):
+        """Initializes the Pyannote diarization pipeline."""
         try:
-            logger.info(f"Loading NeMo diarization models on {self.diarization_device}")
-            import tempfile
-            temp_dir = settings.temp_dir if hasattr(settings, 'temp_dir') and settings.temp_dir else None
-            self.nemo_base_temp_dir = tempfile.mkdtemp(dir=temp_dir)
-            base_config = create_config(self.nemo_base_temp_dir)
-            self.nemo_diarizer = NeuralDiarizer(cfg=base_config).to(self.diarization_device)
+            logger.info(f"Loading Pyannote diarization pipeline on {self.diarization_device}")
+            
+            # Get HuggingFace token from settings
+            hf_token = settings.huggingface_token or settings.hf_token
+            if not hf_token:
+                logger.warning("No HuggingFace token found. Pipeline will attempt to use cached models or public access.")
+            
+            # Initialize Pyannote pipeline
+            model_name = "pyannote/speaker-diarization-3.1"
+            self.pyannote_pipeline = Pipeline.from_pretrained(
+                model_name,
+                use_auth_token=hf_token
+            )
+            
+            # Move to specified device
+            self.pyannote_pipeline.to(torch.device(self.diarization_device))
+            
+            logger.info(f"Successfully loaded Pyannote diarization pipeline: {model_name} on {self.diarization_device}")
+            
         except Exception as e:
-            raise ModelInitializationError(f"NeMo diarization model initialization failed: {e}")
+            logger.error(f"Failed to initialize Pyannote diarization pipeline: {e}")
+            raise ModelInitializationError(f"Pyannote diarization pipeline initialization failed: {e}")
     
     # Whisper model access methods
     def get_whisper_model(self) -> faster_whisper.WhisperModel:
@@ -159,14 +171,14 @@ class ModelManager:
             self._initialize_punctuation_model()
         return self.punctuation_model
 
-    # NeMo diarization model access methods
-    def get_nemo_diarizer(self) -> NeuralDiarizer:
-        """Get the shared NeMo diarization model instance"""
-        if self.nemo_diarizer is None:
-            self._initialize_nemo_diarizer()
-        if self.nemo_diarizer is None:
-            raise ModelInitializationError("NeMo diarization model not initialized")
-        return self.nemo_diarizer
+    # Pyannote diarization pipeline access methods
+    def get_pyannote_pipeline(self) -> Pipeline:
+        """Get the shared Pyannote diarization pipeline instance"""
+        if self.pyannote_pipeline is None:
+            self._initialize_pyannote_pipeline()
+        if self.pyannote_pipeline is None:
+            raise ModelInitializationError("Pyannote diarization pipeline not initialized")
+        return self.pyannote_pipeline
     
     # Device information
     def get_whisper_device(self) -> str:
@@ -207,18 +219,9 @@ class ModelManager:
                 del self.punctuation_model
                 self.punctuation_model = None
             
-            if self.nemo_diarizer is not None:
-                del self.nemo_diarizer
-                self.nemo_diarizer = None
-            
-            # Clean up the base temp directory for NeMo
-            if self.nemo_base_temp_dir is not None:
-                import shutil
-                import os
-                if os.path.exists(self.nemo_base_temp_dir):
-                    shutil.rmtree(self.nemo_base_temp_dir)
-                    logger.info(f"Cleaned up NeMo base temp directory: {self.nemo_base_temp_dir}")
-                self.nemo_base_temp_dir = None
+            if self.pyannote_pipeline is not None:
+                del self.pyannote_pipeline
+                self.pyannote_pipeline = None
             
             # Clear GPU cache if available
             if torch.cuda.is_available():
@@ -235,7 +238,7 @@ class ModelManager:
             "whisper_loaded": self.whisper_model is not None,
             "alignment_loaded": self.alignment_model is not None,
             "punctuation_loaded": self.punctuation_model is not None,
-            "nemo_diarizer_loaded": self.nemo_diarizer is not None,
+            "pyannote_pipeline_loaded": self.pyannote_pipeline is not None,
             "device": self.device,
             "diarization_device": self.diarization_device,
         }

@@ -13,46 +13,17 @@ logger = logging.getLogger(__name__)
 
 
 class WhisperService:
-    def __init__(self, use_shared_models: bool = True):
-        self.use_shared_models = use_shared_models
+    def __init__(self):
         self.model = None
         self.pipeline = None
         
-        if not use_shared_models:
-            # Legacy mode: create own model instance
-            self.device = self._resolve_device(settings.device)
-            self.model_name = settings.whisper_model
-            self.compute_type = "int8" if self.device == "cpu" else "float16"
-            self._initialize_model()
-        else:
-            # Shared mode: use ModelManager instances
-            self.model = model_manager.get_whisper_model()
-            self.pipeline = model_manager.get_whisper_pipeline()
-            self.device = model_manager.get_whisper_device()
-            self.model_name = settings.whisper_model
-            self.compute_type = model_manager.get_compute_type()
-            logger.info(f"Using shared Whisper model: {self.model_name} on {self.device}")
-
-    def _resolve_device(self, device_setting):
-        if device_setting == "auto":
-            if torch.cuda.is_available():
-                return "cuda"
-            else:
-                return "cpu"
-        return device_setting
-    
-    def _initialize_model(self):
-        try:
-            self.model = faster_whisper.WhisperModel(
-                self.model_name,
-                device=self.device,
-                compute_type=self.compute_type
-            )
-            self.pipeline = faster_whisper.BatchedInferencePipeline(self.model)
-            logger.info(f"Initialized Whisper model: {self.model_name} on {self.device}")
-        except Exception as e:
-            logger.error(f"Failed to initialize Whisper model: {e}")
-            raise
+        # Always use ModelManager instances
+        self.model = model_manager.get_whisper_model()
+        self.pipeline = model_manager.get_whisper_pipeline()
+        self.device = model_manager.get_whisper_device()
+        self.model_name = settings.whisper_model
+        self.compute_type = model_manager.get_compute_type()
+        logger.info(f"Using shared Whisper model: {self.model_name} on {self.device}")
     
     def transcribe_audio(
         self,
@@ -196,21 +167,10 @@ class WhisperService:
     
     def cleanup(self):
         try:
-            if not self.use_shared_models:
-                # Only cleanup if using own model instance
-                if self.model:
-                    del self.model
-                    self.model = None
-                if self.pipeline:
-                    del self.pipeline
-                    self.pipeline = None
-                torch.cuda.empty_cache()
-                logger.info("Cleaned up Whisper model")
-            else:
-                # When using shared models, just clear references
-                self.model = None
-                self.pipeline = None
-                logger.info("Cleared references to shared Whisper model")
+            # When using shared models, just clear references
+            self.model = None
+            self.pipeline = None
+            logger.info("Cleared references to shared Whisper model")
         except Exception as e:
             logger.error(f"Failed to cleanup Whisper model: {e}")
     
