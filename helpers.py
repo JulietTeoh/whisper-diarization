@@ -302,39 +302,6 @@ def create_config(output_dir):
 
     return config
 
-def create_manifest_config(output_dir, manifest_path=None):  # Add manifest_path parameter
-    DOMAIN_TYPE = "telephonic"
-    CONFIG_LOCAL_DIRECTORY = "nemo_msdd_configs"
-    CONFIG_FILE_NAME = f"diar_infer_{DOMAIN_TYPE}.yaml"
-    MODEL_CONFIG_PATH = os.path.join(CONFIG_LOCAL_DIRECTORY, CONFIG_FILE_NAME)
-    if not os.path.exists(MODEL_CONFIG_PATH):
-        os.makedirs(CONFIG_LOCAL_DIRECTORY, exist_ok=True)
-        CONFIG_URL = f"https://raw.githubusercontent.com/NVIDIA/NeMo/main/examples/speaker_tasks/diarization/conf/inference/{CONFIG_FILE_NAME}"
-        MODEL_CONFIG_PATH = wget.download(CONFIG_URL, MODEL_CONFIG_PATH)
-
-    config = OmegaConf.load(MODEL_CONFIG_PATH)
-
-    # If a manifest path is provided, use it. Otherwise, this will be set later.
-    if manifest_path:
-        config.diarizer.manifest_filepath = manifest_path
-
-    pretrained_vad = "vad_multilingual_marblenet"
-    pretrained_speaker_model = "titanet_large"
-    config.num_workers = 0  # Set to 0 for server to avoid multiprocessing issues
-    config.diarizer.out_dir = output_dir
-
-    config.diarizer.speaker_embeddings.model_path = pretrained_speaker_model
-    config.diarizer.oracle_vad = False
-    config.diarizer.clustering.parameters.oracle_num_speakers = False
-
-    config.diarizer.vad.model_path = pretrained_vad
-    config.diarizer.vad.parameters.onset = 0.8
-    config.diarizer.vad.parameters.offset = 0.6
-    config.diarizer.vad.parameters.pad_offset = -0.05
-    config.diarizer.msdd_model.model_path = "diar_msdd_telephonic"
-
-    return config
-
 
 def get_word_ts_anchor(s, e, option="start"):
     if option == "end":

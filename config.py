@@ -1,11 +1,8 @@
 import os
 from typing import Optional
 
-try:
-    from pydantic_settings import BaseSettings
-except ImportError:
-    from pydantic import BaseSettings
-
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, computed_field
 
 class Settings(BaseSettings):
     # Server configuration
@@ -15,17 +12,28 @@ class Settings(BaseSettings):
     
     # Model configuration
     whisper_model: str = "medium.en"
-    device: str = "cuda" if os.environ.get("CUDA_VISIBLE_DEVICES") else "cpu"
-    compute_type: str = "float16"
+    device_setting: str = Field(default="auto", alias="device") # Use "auto" as a safe default
+    @computed_field
+    @property
+    def device(self) -> str:
+        if self.device_setting == "auto":
+            import torch
+            return "cuda" if torch.cuda.is_available() else "cpu"
+        return self.device_setting
+
+    @computed_field
+    @property
+    def compute_type(self) -> str:
+        return "int8" if self.device == "cpu" else "float16"
     
     # Audio processing
-    enable_stemming: bool = True
-    enable_punctuation_restoration: bool = True
     suppress_numerals: bool = False
     batch_size: int = 8
     
     # Workflow Configuration
+    enable_stemming: bool = True
     enable_vocal_separation: bool = True
+    enable_punctuation_restoration: bool = True
     enable_speaker_diarization: bool = True
     
     # Chunking configuration for long audio
@@ -40,7 +48,11 @@ class Settings(BaseSettings):
     
     # Diarization configuration
     max_speakers: int = 8
-    diarization_device: str = "cuda" if os.environ.get("CUDA_VISIBLE_DEVICES") else "cpu"
+    @computed_field
+    @property
+    def diarization_device(self) -> str:
+        # Diarization can run on the same device as Whisper
+        return self.device
     
     # Temporary files
     temp_dir: str = "/tmp"

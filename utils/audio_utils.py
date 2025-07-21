@@ -1,4 +1,3 @@
-import os
 import logging
 from typing import List, Tuple
 import librosa
@@ -10,15 +9,16 @@ import torchaudio
 logger = logging.getLogger(__name__)
 
 
+from dataclasses import dataclass
+
+@dataclass
 class AudioChunk:
     """A data class for holding audio chunk information."""
-
-    def __init__(self, audio_data: np.ndarray, start_time: float, end_time: float, chunk_id: int):
-        self.audio_data = audio_data
-        self.start_time = start_time
-        self.end_time = end_time
-        self.chunk_id = chunk_id
-        self.sample_rate = 16000
+    audio_data: np.ndarray
+    start_time: float
+    end_time: float
+    chunk_id: int
+    sample_rate: int = 16000
 
 
 class AudioProcessor:
@@ -110,64 +110,80 @@ class AudioProcessor:
             raise
 
     def convert_to_mono_wav(self, input_path: str, output_path: str) -> str:
-        """
-        Converts any audio file to a mono 16kHz WAV file, which is required for NeMo.
-        This method is critical for ensuring compatibility with the diarization model.
-
-        Args:
-            input_path: Path to the source audio file.
-            output_path: Path to save the converted WAV file.
-
-        Returns:
-            The path to the converted output file.
-        """
         try:
             logger.info(f"Converting {input_path} to mono WAV at {self.target_sample_rate}Hz.")
-
-            # --- FIX ---
-            # Replaced pydub with librosa for robust audio loading and conversion.
-            # librosa.load handles resampling to target_sample_rate and converting to mono.
-            # This is the standard and most reliable approach for ML audio pipelines.
-            audio_data, _ = librosa.load(
-                input_path,
-                sr=self.target_sample_rate,
-                mono=True
-            )
-
-            # Librosa returns a float32 numpy array. We convert it to a torch tensor
-            # and save with torchaudio to create a clean, standard WAV file that
-            # NeMo's VAD module can read without errors.
+            audio_data, _ = librosa.load(input_path, sr=self.target_sample_rate, mono=True)
             audio_tensor = torch.from_numpy(audio_data).unsqueeze(0)
-
-            torchaudio.save(
-                output_path,
-                audio_tensor,
-                self.target_sample_rate,
-                channels_first=True
-            )
+            torchaudio.save(output_path, audio_tensor, self.target_sample_rate, channels_first=True)
             logger.info(f"Successfully converted and saved mono WAV: {output_path}")
             return output_path
         except Exception as e:
             logger.error(f"Failed to convert audio file {input_path} to mono WAV: {e}")
             raise
 
-    def merge_transcription_results(self, chunk_results: List[dict]) -> dict:
+    def merge_diarization_results(self, chunk_results: List[Tuple[dict, AudioChunk]]) -> dict:
         """
-        Merges transcription results from multiple chunks into a single result.
-        (This method is a placeholder and may need more sophisticated logic for
-        handling speaker labels and timestamps across chunk boundaries).
+        Merges diarization results from multiple chunks.
+
+        This function adjusts timestamps to be absolute and provides a basic framework
+        for re-mapping speaker labels. For production use, the speaker re-mapping
+        should be replaced with a more robust algorithm based on speaker embeddings.
         """
         if not chunk_results:
-            return {"text": "", "segments": [], "words": []}
+            return {"text": "", "segments": []}
 
-        # This is a simplified merge. A more advanced implementation would be needed
-        # to properly handle speaker mapping across chunks.
-        full_text = " ".join(res.get("text", "") for res in chunk_results)
-        all_segments = [seg for res in chunk_results for seg in res.get("segments", [])]
-        all_words = [word for res in chunk_results for word in res.get("words", [])]
+        final_segments = []
+        full_text = []
+
+        # Sort chunks by start time to process them in order
+        sorted_chunks = sorted(chunk_results, key=lambda x: x[1].start_time)
+
+        # --- Placeholder for advanced speaker mapping ---
+        # In a real system, you would build a global speaker map here by clustering
+        # speaker embeddings from all chunks *before* processing segments.
+        # For this example, we use a simpler (but less accurate) sequential mapping.
+        global_speaker_map = {}
+        next_global_speaker_id = 0
+
+        for result, chunk in sorted_chunks:
+            if not result or "segments" not in result:
+                continue
+
+            full_text.append(result.get("text", ""))
+
+            # Map local speaker IDs in this chunk to global IDs
+            local_to_global_id_map = {}
+            for segment in sorted(result["segments"], key=lambda x: x['start']):
+                local_speaker = segment.get("speaker")
+                if local_speaker not in local_to_global_id_map:
+                    # This naive mapping assumes new speakers in each chunk are new globally.
+                    # This is where you would consult the advanced clustering result.
+                    if local_speaker not in global_speaker_map:
+                        global_speaker_map[local_speaker] = f"speaker_{next_global_speaker_id}"
+                        next_global_speaker_id += 1
+                    local_to_global_id_map[local_speaker] = global_speaker_map[local_speaker]
+
+                # Adjust timestamps and speaker labels
+                segment['start'] += chunk.start_time
+                segment['end'] += chunk.start_time
+                segment['speaker'] = local_to_global_id_map[local_speaker]
+
+                final_segments.append(segment)
+
+        # Post-processing: Merge consecutive segments from the same speaker
+        if not final_segments:
+            return {"text": " ".join(full_text).strip(), "segments": []}
+
+        merged_segments = [final_segments[0]]
+        for next_seg in final_segments[1:]:
+            last_seg = merged_segments[-1]
+            if last_seg['speaker'] == next_seg['speaker'] and last_seg['end'] >= next_seg['start']:
+                last_seg['end'] = max(last_seg['end'], next_seg['end'])  # Extend the segment
+                last_seg['text'] += " " + next_seg.get('text', '')
+            else:
+                merged_segments.append(next_seg)
 
         return {
-            "text": full_text.strip(),
-            "segments": all_segments,
-            "words": all_words
+            "text": " ".join(full_text).strip(),
+            "segments": merged_segments
         }
